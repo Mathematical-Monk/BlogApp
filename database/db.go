@@ -1,0 +1,173 @@
+package database
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+type Store struct {
+	db *sql.DB
+}
+
+type article struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+
+func CreateDatabaseStore() (*Store,error) {
+	store := &Store{}
+	DBhandle,err := sql.Open("pgx","postgres://postgres:mysecretpassword@localhost:5432/postgres?sslmode=disable")
+	if err != nil {
+		return nil,err
+	}
+
+	err = DBhandle.Ping()
+	if err != nil {
+		return nil,err
+	}
+
+	fmt.Println("database connection established")
+	
+	store.db = DBhandle
+	return store,nil
+}
+
+func (store* Store) StreamArticlesByUser(w io.Writer, username string) error {
+
+	var userId uint64
+
+	row := store.db.QueryRow("select id from users where username = $1", username)
+
+	err := row.Scan(&userId)
+	if err != nil {
+		return err
+	}
+
+	rows, err := store.db.Query("select title, body from articles where author_id = $1", userId)
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close()
+
+	//start creating the json array stream manually
+	_, err = w.Write([]byte("["))
+	if err != nil {
+		return err
+	}
+
+	var article article
+
+	var isFirstRow bool = true
+
+	for rows.Next() {
+
+		if !isFirstRow {
+			_, err = w.Write([]byte(","))
+			if err != nil {
+				return err
+			}
+		}
+		isFirstRow = false
+
+		err = rows.Scan(&article.Title, &article.Body)
+		if err != nil {
+			return err
+		}
+
+		err = json.NewEncoder(w).Encode(article)
+		if err != nil {
+			return err
+		}
+
+	}
+	_, err = w.Write([]byte("]"))
+	if err != nil {
+		return err
+	}
+
+	return rows.Err()
+
+}
+
+
+func (store* Store) RegisterUser(username string, passwordHash string) error{
+
+	_,err := store.db.Exec("insert into users(username, passwordhash) values ($1, $2)", username, passwordHash)
+	if err != nil {
+		return err;
+	}
+
+	return nil
+
+}
+
+
+func (store* Store) CreateArticleInDb(articleBody string, title string, author string) error {
+
+	var id uint64
+
+	row := store.db.QueryRow("select id from users where username = $1", author)
+
+	err := row.Scan(&id)
+	if err != nil {
+		return err
+	}
+
+	_,err = store.db.Exec("insert into articles(title, body, author_id) values ($1, $2, $3)", title, articleBody, id)
+	if err != nil {
+		return err;
+	}
+	return nil
+	
+}
+
+func (store* Store) StreamAllArticles(w io.Writer) error {
+
+	rows,err := store.db.Query("select title, body from articles")
+	if err != nil {
+		return err
+	}
+
+	defer rows.Close()
+
+	var article article
+
+	isFirstRow := true
+
+	_, err = w.Write([]byte("["))
+	if err != nil {
+		return err
+	}
+
+	for rows.Next() {
+
+		if !isFirstRow {
+			_, err = w.Write([]byte(","))
+			if err != nil {
+				return err
+			}
+		}
+		isFirstRow = false
+
+		err = rows.Scan(&article.Title, &article.Body)
+		if err != nil {
+			return err
+		}
+
+		err = json.NewEncoder(w).Encode(article)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = w.Write([]byte("]"))
+	if err != nil {
+		return err
+	}
+
+	return rows.Err()
+}
