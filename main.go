@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	// "strconv"
-	// "strings"
 	"blogapi/database"
+	"blogapi/models"
 	"golang.org/x/crypto/bcrypt"
-
 	"github.com/go-chi/chi/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -36,10 +34,10 @@ type article struct {
 // handles the creation of new articles
 func (server *server) handlecreateArticle(w http.ResponseWriter, r *http.Request) {
 
-	var article article
+	var article models.Article
 
 	json.NewDecoder(r.Body).Decode(&article)
-	err := server.store.CreateArticleInDb(article.Body, article.Title, article.Author)
+	err := server.store.CreateArticleInDb(article)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -67,7 +65,7 @@ func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Requ
 
 }
 
-// handles getting specific articles by id
+//handles getting specific articles by id
 func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Request) {
 
 	username := chi.URLParam(r, "username")
@@ -85,18 +83,41 @@ func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Req
 
 }
 
-func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
+// func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
 
-	w.Header().Set("Content-type", "application/json")
+// 	w.Header().Set("Content-type", "application/json")
 
-	err := server.store.StreamAllArticles(w)
+// 	err := server.store.StreamAllArticles(w)
+// 	if err != nil {
+// 		fmt.Println(err)
+// 		return
+// 	}
+// }
+
+func (server* server) handleUserLogin(w http.ResponseWriter, r* http.Request){
+
+	var user user
+
+	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-}
+	userRegistered,err := server.store.VerifyUserRegistered(user.Username)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
-func ()
+	if userRegistered {
+		//token logic when user is registered
+
+	}else{
+		w.Header().Set("Content-type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"userRegistered":false}`))
+	}
+}
 
 
 
@@ -113,7 +134,7 @@ func main() {
 	var server server = server{store}
 
 	r.Get("/api/articles/{username}", server.handleGetArticlesByUser)
-	r.Get("/api/articles", server.handleGetAllArticles)
+	// r.Get("/api/articles", server.handleGetAllArticles)
 
 	r.Post("/api/articles", server.handlecreateArticle)
 	r.Post("/api/signup", server.handleUserRegistration)
