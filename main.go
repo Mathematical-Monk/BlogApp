@@ -1,15 +1,19 @@
 package main
 
 import (
+	"blogapi/database"
+	"blogapi/middlewares"
+	"blogapi/models"
+	"blogapi/utils"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"blogapi/database"
-	"blogapi/models"
-	"golang.org/x/crypto/bcrypt"
+	"time"
+
 	"github.com/go-chi/chi/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // global db handle, it maintains a connection pool of database connections
@@ -21,7 +25,7 @@ type server struct {
 }
 
 type user struct {
-	Username     string `json:"username"`
+	Username string `json:"username"`
 	Password string `json:"passwordHash"`
 }
 
@@ -50,10 +54,11 @@ func (server *server) handlecreateArticle(w http.ResponseWriter, r *http.Request
 // handles the registration of a new user
 func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Request) {
 
-	var newUser user
+	var newUser models.CreateUser
 	json.NewDecoder(r.Body).Decode(&newUser)
-	passworHdash, _ := bcrypt.GenerateFromPassword([]byte(newUser.Password), bcrypt.DefaultCost)
-	err := server.store.RegisterUser(newUser.Username, string(passworHdash))
+	passworHash, _ := bcrypt.GenerateFromPassword([]byte(newUser.PasswordHash), bcrypt.DefaultCost)
+	newUser.PasswordHash = string(passworHash) //we are using the original password and passwordHash with the same name passwordHash
+	err := server.store.RegisterUser(newUser)
 	if err != nil {
 		fmt.Println(err)
 		w.WriteHeader(http.StatusInternalServerError)
@@ -65,7 +70,7 @@ func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Requ
 
 }
 
-//handles getting specific articles by id
+// handles getting specific articles by id
 func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Request) {
 
 	username := chi.URLParam(r, "username")
@@ -83,18 +88,18 @@ func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Req
 
 }
 
-// func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
+func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
 
-// 	w.Header().Set("Content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 
-// 	err := server.store.StreamAllArticles(w)
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return
-// 	}
-// }
+	err := server.store.StreamAllArticles(w)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+}
 
-func (server* server) handleUserLogin(w http.ResponseWriter, r* http.Request){
+func (server *server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 
 	var user user
 
@@ -103,23 +108,83 @@ func (server* server) handleUserLogin(w http.ResponseWriter, r* http.Request){
 		fmt.Println(err)
 		return
 	}
-	userRegistered,err := server.store.VerifyUserRegistered(user.Username)
+	userRegistered, err := server.store.VerifyUserRegistered(user.Username)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
 	if userRegistered {
-		//token logic when user is registered
+		token, err := utils.GenerateJwt(user.Username)
+		if err != nil {
+			fmt.Println(err)
+			w.Header().Set("Content-type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"failure in generating the token"}`))
+			return
+		}
 
-	}else{
+		cookie := http.Cookie{
+			Name:     "token",
+			Value:    token,
+			Expires:  time.Now().Add(15 * time.Minute),
+			HttpOnly: true,
+			Path:     "/",
+		}
+
+		http.SetCookie(w, &cookie)
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"message":"user logged in"}`))
+
+	} else {
 		w.Header().Set("Content-type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"userRegistered":false}`))
+		w.Write([]byte(`{"message":"user login failed"}`))
 	}
 }
 
+func (server *server) handleEditArticle(w http.ResponseWriter, r *http.Request) {
 
+	var article models.Article
+
+	err := json.NewDecoder(r.Body).Decode(&article)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	err = server.store.RegisterEditedArticle(article)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	w.Header().Set("Content-type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write([]byte(`{"updated":true}`))
+
+}
+
+func (server *server) handleDeleteArticle(w http.ResponseWriter, r *http.Request) {
+
+	var article models.Article
+
+	err := json.NewDecoder(r.Body).Decode(&article)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	err = server.store.DeleteArticle(article)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	w.Header().Set("Content-type", "application/json")
+	w.WriteHeader(http.StatusGone)
+	w.Write([]byte(`{"deleted":true}`))
+
+}
 
 func main() {
 
@@ -133,15 +198,24 @@ func main() {
 
 	var server server = server{store}
 
-	r.Get("/api/articles/{username}", server.handleGetArticlesByUser)
-	// r.Get("/api/articles", server.handleGetAllArticles)
+	r.Route("/api", func(r chi.Router) {
 
-	r.Post("/api/articles", server.handlecreateArticle)
-	r.Post("/api/signup", server.handleUserRegistration)
+		r.Post("/login", server.handleUserLogin)
+		r.Post("/signup", server.handleUserRegistration)
+		r.Get("/articles", server.handleGetAllArticles)
 
-	r.Post("/api/login", server.handleUserLogin)
+		r.Group(func(r chi.Router) {
 
-	// r.Patch("/api/articles", server.handleEditArticle)
+			r.Use(middlewares.AuthenticationMiddleware)
+
+			r.Get("/articles/{username}", server.handleGetArticlesByUser)
+			r.Post("/articles", server.handlecreateArticle)
+			r.Patch("/articles", server.handleEditArticle)
+			r.Delete("/articles", server.handleDeleteArticle)
+
+		})
+
+	})
 
 	err = http.ListenAndServe(":8080", r)
 	if err != nil {
