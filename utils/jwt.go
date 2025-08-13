@@ -9,15 +9,17 @@ import (
 
 const jwtKey = "my-secret-key"
 
-func GenerateJwt(username string) (string, error) {
+func GenerateJwt(username string, userId int64) (string, error) {
 
 	expirationTime := time.Now().Add(24 * time.Hour)
 
 	claims := &models.Claims{
 
+		UserId: userId,
 		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
+			IssuedAt: jwt.NewNumericDate(time.Now()),
 		},
 	}
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,20 +20,9 @@ import (
 // global db handle, it maintains a connection pool of database connections
 var GlobalDb *sql.DB
 
-// required struct types
+// server struct that holds the pointer to the database store
 type server struct {
 	store *database.Store
-}
-
-type user struct {
-	Username string `json:"username"`
-	Password string `json:"passwordHash"`
-}
-
-type article struct {
-	Author string `json:"author"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
 }
 
 // handles the creation of new articles
@@ -73,14 +63,20 @@ func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Requ
 // handles getting specific articles by id
 func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Request) {
 
-	username := chi.URLParam(r, "username")
-	fmt.Println(username)
-	if username == "" {
-		http.Error(w, "username is required", http.StatusBadRequest)
+	userIdString := chi.URLParam(r, "userId")
+	fmt.Println(userIdString)
+	if userIdString == "" {
+		http.Error(w, "userId is required", http.StatusBadRequest)
 		return
 	}
 
-	err := server.store.StreamArticlesByUser(w, username)
+	userId, err := strconv.ParseInt(userIdString, 10, 64)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	err = server.store.StreamArticlesByUser(w, userId)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -101,46 +97,38 @@ func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Reques
 
 func (server *server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 
-	var user user
+	var user models.VerifyUser
 
 	err := json.NewDecoder(r.Body).Decode(&user)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	userRegistered, err := server.store.VerifyUserRegistered(user.Username)
+	userId, passwordHash, err := server.store.VerifyUserRegistered(user.UserName, user.Password)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
-	if userRegistered {
-		token, err := utils.GenerateJwt(user.Username)
-		if err != nil {
-			fmt.Println(err)
-			w.Header().Set("Content-type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"message":"failure in generating the token"}`))
-			return
-		}
+	bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(user.Password))
 
-		cookie := http.Cookie{
-			Name:     "token",
-			Value:    token,
-			Expires:  time.Now().Add(15 * time.Minute),
-			HttpOnly: true,
-			Path:     "/",
-		}
-
-		http.SetCookie(w, &cookie)
-		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte(`{"message":"user logged in"}`))
-
-	} else {
-		w.Header().Set("Content-type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"message":"user login failed"}`))
+	token, err := utils.GenerateJwt(user.UserName, userId)
+	if err != nil {
+		fmt.Println(err)
+		http.Error(w, "error generating jwt", http.StatusInternalServerError)
 	}
+
+	cookie := http.Cookie{
+		Name:     "token",
+		Value:    token,
+		Expires:  time.Now().Add(15 * time.Minute),
+		HttpOnly: true,
+		Path:     "/",
+	}
+	http.SetCookie(w, &cookie)
+	w.WriteHeader(http.StatusAccepted)
+	w.Write([]byte(`{"message":"user logged in"}`))
+
 }
 
 func (server *server) handleEditArticle(w http.ResponseWriter, r *http.Request) {
@@ -208,7 +196,7 @@ func main() {
 
 			r.Use(middlewares.AuthenticationMiddleware)
 
-			r.Get("/articles/{username}", server.handleGetArticlesByUser)
+			r.Get("/articles/{userId}", server.handleGetArticlesByUser)
 			r.Post("/articles", server.handlecreateArticle)
 			r.Patch("/articles", server.handleEditArticle)
 			r.Delete("/articles", server.handleDeleteArticle)

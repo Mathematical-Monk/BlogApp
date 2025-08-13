@@ -8,9 +8,7 @@ type Article struct {
 }
 
 type CreateArticle struct {
-	Title string `json:"title"`
-	Body string `json:"body"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
 	AuthorId uint64 `json:"authorId"`
 }
-
-

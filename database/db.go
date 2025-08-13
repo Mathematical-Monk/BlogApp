@@ -1,10 +1,11 @@
 package database
 
 import (
+	"golang.org/x/crypto/bcrypt"
 	"blogapi/models"
 	"database/sql"
 	"encoding/json"
-	"errors"
+	// "errors"
 	"fmt"
 	"io"
 )
@@ -31,17 +32,9 @@ func CreateDatabaseStore() (*Store, error) {
 	return store, nil
 }
 
-func (store *Store) StreamArticlesByUser(w io.Writer, username string) error {
+func (store *Store) StreamArticlesByUser(w io.Writer, userId int64) error {
 
-	var userId uint64
 	var article models.Article
-
-	row := store.db.QueryRow("select id from users where username = $1", username)
-
-	err := row.Scan(&userId)
-	if err != nil {
-		return err
-	}
 
 
 	rows, err := store.db.Query("select id, title, body, author_id from articles where author_id = $1", userId)
@@ -91,7 +84,7 @@ func (store *Store) StreamArticlesByUser(w io.Writer, username string) error {
 
 func (store *Store) RegisterUser(user models.CreateUser) error {
 
-	_, err := store.db.Exec("insert into users(username, passwordhash) values ($1, $2)", user.Usename, user.PasswordHash)
+	_, err := store.db.Exec("insert into users(username, passwordhash) values ($1, $2)", user.UserName, user.PasswordHash)
 	if err != nil {
 		return err
 	}
@@ -157,19 +150,23 @@ func (store *Store) StreamAllArticles(w io.Writer) error {
 	return rows.Err()
 }
 
-func (store *Store) VerifyUserRegistered(username string) (bool, error) {
+func (store *Store) VerifyUserRegistered(username string, password string) (int64, string, error) {
 
-	var placeholder string
-
-	row := store.db.QueryRow("select username from users where username = $1", username)
-	err := row.Scan(&placeholder)
+	var userId int64
+	var passwordHash string
+	
+	row := store.db.QueryRow("select id, passwordHash from users where username = $1", username)
+	err := row.Scan(&userId, &passwordHash)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
+		return -1, "", err
 	}
-	return true, nil
+
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password))
+	if err != nil {
+		return -1, "", err
+	}
+
+	return userId, passwordHash, nil
 
 }
 
