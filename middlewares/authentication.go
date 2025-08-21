@@ -2,14 +2,18 @@ package middlewares
 
 import (
 	"blogapi/models"
+	"context"
 	"fmt"
 	"net/http"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
 func AuthenticationMiddleware(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		var claims models.Claims
 
 		jwtToken, err := r.Cookie("token")
 		if err != nil {
@@ -18,7 +22,7 @@ func AuthenticationMiddleware(next http.Handler) http.Handler {
 
 		}
 
-		token, err := jwt.ParseWithClaims(jwtToken.Value, &models.Claims{}, getSecretKey)
+		token, err := jwt.ParseWithClaims(jwtToken.Value, &claims, getSecretKey)
 		if err != nil {
 			writeResponseForFailedAuthentication(w, err)
 			return
@@ -42,6 +46,10 @@ func AuthenticationMiddleware(next http.Handler) http.Handler {
 			w.Write([]byte(`{"authorized":"false"}`))
 			return
 		}
+
+		ctx := context.WithValue(r.Context(), "userId", claims.UserId)
+
+		r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
 	})

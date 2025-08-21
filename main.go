@@ -31,9 +31,18 @@ func (server *Server) handlecreateArticle(w http.ResponseWriter, r *http.Request
 	err := json.NewDecoder(r.Body).Decode(&article)
 	if err != nil {
 		fmt.Println(err)
-		utils.RespondWithJson(w, http.StatusBadRequest, models.CreateResStruct("resource not created due to bad response body"))
+		utils.RespondWithJson(w, http.StatusBadRequest, models.CreateResStruct("wrong credentials"))
 		return
 	}
+
+	value, ok := r.Context().Value("userId").(int64)
+	if !ok {
+		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("couldnt retrieve context userId"))
+		return
+	}
+
+	article.AuthorId = value
 
 	err = server.store.CreateArticleInDb(article)
 	if err != nil {
@@ -42,11 +51,8 @@ func (server *Server) handlecreateArticle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var res models.HttpResponse = models.HttpResponse{
-		Msg: "article created",
-	}
 
-	utils.RespondWithJson(w, http.StatusCreated, res)
+	utils.RespondWithJson(w, http.StatusCreated, models.CreateResStruct("article created"))
 
 }
 
@@ -60,12 +66,10 @@ func (server *Server) handleUserRegistration(w http.ResponseWriter, r *http.Requ
 	err := server.store.RegisterUser(newUser)
 	if err != nil {
 		fmt.Println(err)
-		w.WriteHeader(http.StatusInternalServerError)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("internal server error"))
 		return
 	}
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"userRegistered" : true}`))
+	utils.RespondWithJson(w, http.StatusAccepted, models.CreateResStruct("user registered"))
 
 }
 
@@ -75,19 +79,19 @@ func (server *Server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Req
 	userIdString := chi.URLParam(r, "userId")
 	fmt.Println(userIdString)
 	if userIdString == "" {
-		http.Error(w, "userId is required", http.StatusBadRequest)
+		utils.RespondWithJson(w, http.StatusBadRequest, models.CreateResStruct("bad request, userId is required"))
 		return
 	}
 
 	userId, err := strconv.ParseInt(userIdString, 10, 64)
 	if err != nil {
-		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("wrong format for userId"))
 		return
 	}
 
 	err = server.store.StreamArticlesByUser(w, userId)
 	if err != nil {
-		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("internal server error"))
 		return
 	}
 
@@ -99,7 +103,7 @@ func (server *Server) handleGetAllArticles(w http.ResponseWriter, r *http.Reques
 
 	err := server.store.StreamAllArticles(w)
 	if err != nil {
-		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("internal server error"))
 		return
 	}
 }
@@ -116,10 +120,17 @@ func (server *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	userId, passwordHash, err := server.store.VerifyUserRegistered(user.UserName, user.Password)
 	if err != nil {
 		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusUnauthorized, models.CreateResStruct("wrong credentials"))
 		return
 	}
 
-	bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(user.Password))
+	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(user.Password))
+	if err != nil {
+		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusUnauthorized, models.CreateResStruct("wrong credentials"))
+		return
+
+	}
 
 	token, err := utils.GenerateJwt(user.UserName, userId)
 	if err != nil {
@@ -135,8 +146,7 @@ func (server *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 	}
 	http.SetCookie(w, &cookie)
-	w.WriteHeader(http.StatusAccepted)
-	w.Write([]byte(`{"message":"user logged in"}`))
+	utils.RespondWithJson(w, http.StatusOK, models.CreateResStruct("user logged in"))
 
 }
 
@@ -165,9 +175,7 @@ func (server *Server) handleEditArticle(w http.ResponseWriter, r *http.Request) 
 
 	}
 
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"msg":"updated"}`))
+	utils.RespondWithJson(w, http.StatusCreated, models.CreateResStruct("article updated"))
 
 }
 
@@ -187,9 +195,7 @@ func (server *Server) handleDeleteArticle(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusGone)
-	w.Write([]byte(`{"msg":"deleted"}`))
+	utils.RespondWithJson(w, http.StatusOK, models.CreateResStruct("article deleted"))
 
 }
 
@@ -229,6 +235,3 @@ func main() {
 	}
 
 }
-
-
-

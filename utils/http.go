@@ -1,12 +1,15 @@
 package utils
 
 import (
-	"net/http"
+	"blogapi/models"
 	"encoding/json"
+	"net/http"
 )
 
 
-func RespondWithJson(w http.ResponseWriter, status int, payload any) error {
+
+
+func RespondWithJson(w http.ResponseWriter, status int, payload models.HttpResponse) error {
 	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(status)
 	msg, err := json.Marshal(payload)
