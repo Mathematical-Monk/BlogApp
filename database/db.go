@@ -1,10 +1,10 @@
 package database
 
 import (
-	"golang.org/x/crypto/bcrypt"
 	"blogapi/models"
 	"database/sql"
 	"encoding/json"
+	"golang.org/x/crypto/bcrypt"
 	// "errors"
 	"fmt"
 	"io"
@@ -35,7 +35,6 @@ func CreateDatabaseStore() (*Store, error) {
 func (store *Store) StreamArticlesByUser(w io.Writer, userId int64) error {
 
 	var article models.Article
-
 
 	rows, err := store.db.Query("select id, title, body, author_id from articles where author_id = $1", userId)
 	if err != nil {
@@ -131,7 +130,7 @@ func (store *Store) StreamAllArticles(w io.Writer) error {
 		}
 		isFirstRow = false
 
-		err = rows.Scan(&article.Id,&article.Title, &article.Body, &article.AuthorId)
+		err = rows.Scan(&article.Id, &article.Title, &article.Body, &article.AuthorId)
 		if err != nil {
 			return err
 		}
@@ -154,7 +153,7 @@ func (store *Store) VerifyUserRegistered(username string, password string) (int6
 
 	var userId int64
 	var passwordHash string
-	
+
 	row := store.db.QueryRow("select id, passwordHash from users where username = $1", username)
 	err := row.Scan(&userId, &passwordHash)
 	if err != nil {
@@ -172,19 +171,37 @@ func (store *Store) VerifyUserRegistered(username string, password string) (int6
 
 func (store *Store) RegisterEditedArticle(article models.Article) error {
 
-	_,err := store.db.Exec("update articles set title = $1,body = $2 where id = $3", article.Title, article.Body, article.Id)
+	_, err := store.db.Exec("update articles set title = $1,body = $2 where id = $3", article.Title, article.Body, article.Id)
 	if err != nil {
 		return err
 	}
-	return nil;
+	return nil
 }
 
+func (store *Store) DeleteArticle(article models.Article) error {
 
-func (store* Store) DeleteArticle(article models.Article) error {
-
-	_,err := store.db.Exec("delete from articles where id = $1", article.Id)
+	_, err := store.db.Exec("delete from articles where id = $1", article.Id)
 	if err != nil {
 		return err
 	}
-	return nil;
+	return nil
+}
+
+func (store *Store) CheckAndEditArticle(article models.Article) (bool, error) {
+
+	rowsInfo, err := store.db.Exec("update articles set body = $1, title = $2 where id = $3 and author_id = $4", article.Body, article.Title, article.Id, article.AuthorId)
+	if err != nil {
+		return false, err
+	}
+
+	rowsAffected, err := rowsInfo.RowsAffected()
+	if err != nil {
+		return false, nil
+	}
+
+	if rowsAffected == 0 {
+		return false, nil
+	}else {
+		return true, nil
+	}
 }

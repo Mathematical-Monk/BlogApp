@@ -5,7 +5,8 @@ import (
 	"blogapi/middlewares"
 	"blogapi/models"
 	"blogapi/utils"
-	"database/sql"
+	// "database/sql"
+	// "blogapi/server"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,31 +19,39 @@ import (
 )
 
 // global db handle, it maintains a connection pool of database connections
-var GlobalDb *sql.DB
-
-// server struct that holds the pointer to the database store
-type server struct {
+type Server struct {
 	store *database.Store
 }
 
 // handles the creation of new articles
-func (server *server) handlecreateArticle(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handlecreateArticle(w http.ResponseWriter, r *http.Request) {
 
 	var article models.Article
 
-	json.NewDecoder(r.Body).Decode(&article)
-	err := server.store.CreateArticleInDb(article)
+	err := json.NewDecoder(r.Body).Decode(&article)
 	if err != nil {
 		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusBadRequest, models.CreateResStruct("resource not created due to bad response body"))
 		return
 	}
-	w.Header().Set("Content-type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"articleCreated":true}`))
+
+	err = server.store.CreateArticleInDb(article)
+	if err != nil {
+		fmt.Println(err)
+		utils.RespondWithJson(w, http.StatusInternalServerError, models.CreateResStruct("database error"))
+		return
+	}
+
+	var res models.HttpResponse = models.HttpResponse{
+		Msg: "article created",
+	}
+
+	utils.RespondWithJson(w, http.StatusCreated, res)
+
 }
 
 // handles the registration of a new user
-func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleUserRegistration(w http.ResponseWriter, r *http.Request) {
 
 	var newUser models.CreateUser
 	json.NewDecoder(r.Body).Decode(&newUser)
@@ -61,7 +70,7 @@ func (server *server) handleUserRegistration(w http.ResponseWriter, r *http.Requ
 }
 
 // handles getting specific articles by id
-func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Request) {
 
 	userIdString := chi.URLParam(r, "userId")
 	fmt.Println(userIdString)
@@ -84,7 +93,7 @@ func (server *server) handleGetArticlesByUser(w http.ResponseWriter, r *http.Req
 
 }
 
-func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleGetAllArticles(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-type", "application/json")
 
@@ -95,7 +104,7 @@ func (server *server) handleGetAllArticles(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-func (server *server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 
 	var user models.VerifyUser
 
@@ -131,7 +140,7 @@ func (server *server) handleUserLogin(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func (server *server) handleEditArticle(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleEditArticle(w http.ResponseWriter, r *http.Request) {
 
 	var article models.Article
 
@@ -140,19 +149,29 @@ func (server *server) handleEditArticle(w http.ResponseWriter, r *http.Request) 
 		fmt.Println(err)
 		return
 	}
-	err = server.store.RegisterEditedArticle(article)
+
+	isAuthorized, err := server.store.CheckAndEditArticle(article)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 
+	if isAuthorized {
+		err = server.store.RegisterEditedArticle(article)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+	}
+
 	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(`{"updated":true}`))
+	w.Write([]byte(`{"msg":"updated"}`))
 
 }
 
-func (server *server) handleDeleteArticle(w http.ResponseWriter, r *http.Request) {
+func (server *Server) handleDeleteArticle(w http.ResponseWriter, r *http.Request) {
 
 	var article models.Article
 
@@ -170,7 +189,7 @@ func (server *server) handleDeleteArticle(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(http.StatusGone)
-	w.Write([]byte(`{"deleted":true}`))
+	w.Write([]byte(`{"msg":"deleted"}`))
 
 }
 
@@ -184,7 +203,7 @@ func main() {
 		return
 	}
 
-	var server server = server{store}
+	var server Server = Server{store}
 
 	r.Route("/api", func(r chi.Router) {
 
@@ -195,7 +214,6 @@ func main() {
 		r.Group(func(r chi.Router) {
 
 			r.Use(middlewares.AuthenticationMiddleware)
-
 			r.Get("/articles/{userId}", server.handleGetArticlesByUser)
 			r.Post("/articles", server.handlecreateArticle)
 			r.Patch("/articles", server.handleEditArticle)
@@ -211,3 +229,6 @@ func main() {
 	}
 
 }
+
+
+
